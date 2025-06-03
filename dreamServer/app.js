@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const { testConnection } = require('./src/config/database');
-const dreamRoutes = require('./src/routes/dreamRoutes');  // 이 줄 추가
+const dreamRoutes = require('./src/routes/dreamRoutes'); 
+const advancedRoutes = require('./src/routes/advancedRoutes'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,20 +13,24 @@ app.use(express.json());
 
 // API 라우터 연결
 app.use('/api', dreamRoutes);
+app.use('/api/advanced', advancedRoutes); 
 
 // 기본 라우트
 app.get('/', (req, res) => {
   res.json({
-    message: '🔮 DreamServer API - DreamRenewal',  // 이 부분도 수정
+    message: '🔮 DreamServer API - DreamRenewal',  
     server: 'dreamServer',
-    project: 'DreamRenewal',  // 이 부분도 수정
+    project: 'DreamRenewal',  
     version: '1.0.0',
     status: 'running',
     endpoints: {
-      api: '/api',           // 이 줄들 추가
+      api: '/api',         
       search: '/api/search?keyword=키워드',
       reverse: '/api/number/7',
-      stats: '/api/stats'
+      stats: '/api/stats',
+      advanced: '/api/advanced',                              
+      advancedSearch: '/api/advanced/search?keyword=강아지가',
+      textAnalysis: '/api/advanced/analyze'                   
     },
     timestamp: new Date().toISOString()
   });
