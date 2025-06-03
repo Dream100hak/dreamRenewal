@@ -1,8 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const { testConnection } = require('./src/config/database');
-const dreamRoutes = require('./src/routes/dreamRoutes'); 
-const advancedRoutes = require('./src/routes/advancedRoutes'); 
+const dreamRoutes = require('./src/routes/dreamRoutes');
+const advancedRoutes = require('./src/routes/advancedRoutes');
+const homonymRoutes = require('./src/routes/homonymRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,24 +14,28 @@ app.use(express.json());
 
 // API 라우터 연결
 app.use('/api', dreamRoutes);
-app.use('/api/advanced', advancedRoutes); 
+app.use('/api/advanced', advancedRoutes);
+app.use('/api/homonym', homonymRoutes);
 
 // 기본 라우트
 app.get('/', (req, res) => {
   res.json({
-    message: '🔮 DreamServer API - DreamRenewal',  
+    message: '🔮 DreamServer API - DreamRenewal',
     server: 'dreamServer',
-    project: 'DreamRenewal',  
+    project: 'DreamRenewal',
     version: '1.0.0',
     status: 'running',
     endpoints: {
-      api: '/api',         
+      api: '/api',
       search: '/api/search?keyword=키워드',
       reverse: '/api/number/7',
       stats: '/api/stats',
-      advanced: '/api/advanced',                              
+      advanced: '/api/advanced',
       advancedSearch: '/api/advanced/search?keyword=강아지가',
-      textAnalysis: '/api/advanced/analyze'                   
+      textAnalysis: '/api/advanced/analyze',
+      homonym: '/api/homonym',                                    // 이 줄 추가
+      homonymAnalyze: '/api/homonym/analyze?keyword=눈&context=눈이 아프다',  // 이 줄 추가
+      homonymList: '/api/homonym/list'                           // 이 줄 추가
     },
     timestamp: new Date().toISOString()
   });
@@ -74,12 +79,12 @@ async function startServer() {
   try {
     console.log('🔍 데이터베이스 연결 테스트 중...');
     const isDbConnected = await testConnection();
-    
+
     if (!isDbConnected) {
       console.error('❌ 데이터베이스 연결 실패 - 서버를 시작할 수 없습니다');
       process.exit(1);
     }
-    
+
     app.listen(PORT, () => {
       console.log('🚀 DreamServer 시작됨');
       console.log(`📡 서버 주소: http://localhost:${PORT}`);
@@ -90,7 +95,7 @@ async function startServer() {
       console.log(`   - 헬스체크: http://localhost:${PORT}/health`);
       console.log(`   - DB테스트: http://localhost:${PORT}/test-db`);
     });
-    
+
   } catch (error) {
     console.error('❌ 서버 시작 실패:', error.message);
     process.exit(1);
