@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { testConnection } = require('./src/config/database');
+const dreamRoutes = require('./src/routes/dreamRoutes');  // 이 줄 추가
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,14 +10,23 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// API 라우터 연결
+app.use('/api', dreamRoutes);
+
 // 기본 라우트
 app.get('/', (req, res) => {
   res.json({
-    message: '🔮 DreamServer API - 백학 로또비법신서',
+    message: '🔮 DreamServer API - DreamRenewal',  // 이 부분도 수정
     server: 'dreamServer',
-    project: 'Dream100Hak',
+    project: 'DreamRenewal',  // 이 부분도 수정
     version: '1.0.0',
     status: 'running',
+    endpoints: {
+      api: '/api',           // 이 줄들 추가
+      search: '/api/search?keyword=키워드',
+      reverse: '/api/number/7',
+      stats: '/api/stats'
+    },
     timestamp: new Date().toISOString()
   });
 });
