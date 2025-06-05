@@ -4,6 +4,7 @@ const { testConnection } = require('./src/config/database');
 const dreamRoutes = require('./src/routes/dreamRoutes');
 const advancedRoutes = require('./src/routes/advancedRoutes');
 const homonymRoutes = require('./src/routes/homonymRoutes');
+const analysisRoutes = require('./src/routes/analysisRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use('/api', dreamRoutes);
 app.use('/api/advanced', advancedRoutes);
 app.use('/api/homonym', homonymRoutes);
+app.use('/api/analysis', analysisRoutes);
 
 // 기본 라우트
 app.get('/', (req, res) => {
@@ -33,9 +35,11 @@ app.get('/', (req, res) => {
       advanced: '/api/advanced',
       advancedSearch: '/api/advanced/search?keyword=강아지가',
       textAnalysis: '/api/advanced/analyze',
-      homonym: '/api/homonym',                                    // 이 줄 추가
-      homonymAnalyze: '/api/homonym/analyze?keyword=눈&context=눈이 아프다',  // 이 줄 추가
-      homonymList: '/api/homonym/list'                           // 이 줄 추가
+      homonym: '/api/homonym',
+      homonymAnalyze: '/api/homonym/analyze?keyword=눈&context=눈이 아프다',
+      homonymList: '/api/homonym/list',
+      analysis: '/api/analysis',                                     
+      dreamAnalysis: '/api/analysis/dream (POST 요청 필요)'                            
     },
     timestamp: new Date().toISOString()
   });
