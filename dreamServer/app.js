@@ -1,10 +1,17 @@
 const express = require('express');
 const cors = require('cors');
 const { testConnection } = require('./src/config/database');
+
+// 기존 라우터들
 const dreamRoutes = require('./src/routes/dreamRoutes');
 const advancedRoutes = require('./src/routes/advancedRoutes');
 const homonymRoutes = require('./src/routes/homonymRoutes');
 const analysisRoutes = require('./src/routes/analysisRoutes');
+
+// 🔥 이 줄 추가! (정확한 경로 확인)
+console.log('🔍 사전 라우터 로드 시도...');
+const dictionaryRoutes = require('./src/routes/dictionaryRoutes');
+console.log('✅ 사전 라우터 로드 성공!');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,13 +20,18 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// API 라우터 연결
+// 기존 라우터 연결
 app.use('/api', dreamRoutes);
 app.use('/api/advanced', advancedRoutes);
 app.use('/api/homonym', homonymRoutes);
 app.use('/api/analysis', analysisRoutes);
 
-// 기본 라우트
+// 🔥 사전 라우터 연결 (로그 추가)
+console.log('🔗 사전 라우터 연결 중...');
+app.use('/api/dictionary', dictionaryRoutes);
+console.log('✅ 사전 라우터 연결 완료!');
+
+// 기본 라우트 (기존 것)
 app.get('/', (req, res) => {
   res.json({
     message: '🔮 DreamServer API - DreamRenewal',
@@ -33,50 +45,16 @@ app.get('/', (req, res) => {
       reverse: '/api/number/7',
       stats: '/api/stats',
       advanced: '/api/advanced',
-      advancedSearch: '/api/advanced/search?keyword=강아지가',
-      textAnalysis: '/api/advanced/analyze',
       homonym: '/api/homonym',
-      homonymAnalyze: '/api/homonym/analyze?keyword=눈&context=눈이 아프다',
-      homonymList: '/api/homonym/list',
-      analysis: '/api/analysis',                                     
-      dreamAnalysis: '/api/analysis/dream (POST 요청 필요)'                            
+      analysis: '/api/analysis',
+      dictionary: '/api/dictionary',  // 🔥 이것도 추가
+      dictionaryTest: '/api/dictionary/test'
     },
     timestamp: new Date().toISOString()
   });
 });
 
-// 헬스 체크 라우트
-app.get('/health', async (req, res) => {
-  try {
-    const dbStatus = await testConnection();
-    res.json({
-      status: 'healthy',
-      database: dbStatus ? 'connected' : 'disconnected',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: error.message
-    });
-  }
-});
-
-// 데이터베이스 테스트 라우트
-app.get('/test-db', async (req, res) => {
-  try {
-    const isConnected = await testConnection();
-    res.json({
-      database_connection: isConnected,
-      message: isConnected ? '데이터베이스 연결 성공' : '데이터베이스 연결 실패'
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: '데이터베이스 테스트 중 오류 발생',
-      details: error.message
-    });
-  }
-});
+// 나머지 코드는 그대로...
 
 // 서버 시작
 async function startServer() {
@@ -96,8 +74,8 @@ async function startServer() {
       console.log('-----------------------------------');
       console.log('💡 테스트 URL:');
       console.log(`   - 기본: http://localhost:${PORT}/`);
-      console.log(`   - 헬스체크: http://localhost:${PORT}/health`);
-      console.log(`   - DB테스트: http://localhost:${PORT}/test-db`);
+      console.log(`   - 사전: http://localhost:${PORT}/api/dictionary/`);
+      console.log(`   - 테스트: http://localhost:${PORT}/api/dictionary/test`);
     });
 
   } catch (error) {
@@ -106,7 +84,4 @@ async function startServer() {
   }
 }
 
-// 서버 시작
 startServer();
-
-module.exports = app;
