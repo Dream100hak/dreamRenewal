@@ -2,6 +2,11 @@
 const { parseDreamText } = require('../utils/dreamTextParser');
 const AdvancedHomonymProcessor = require('./advancedHomonymProcessor');
 const database = require('../config/database');
+const {
+  generateKeywordCandidates,
+  normalizeKeyword,
+  calculateSimilarity
+} = require('../utils/koreanUtils');
 
 class DreamAnalysisEngine {
   
@@ -85,54 +90,239 @@ class DreamAnalysisEngine {
   static async analyzeKeywords(rawKeywords) {
     try {
       const analyzedKeywords = [];
-      
-      for (const keyword of rawKeywords) {
-        // 기본 키워드 정보 조회
-        const keywordInfo = await this.getKeywordInfo(keyword);
-        
-        if (keywordInfo) {
+      if (!rawKeywords || rawKeywords.length === 0) {
+        return analyzedKeywords;
+      }
+
+      const connection = await database.pool.getConnection();
+
+      try {
+        for (const keyword of rawKeywords) {
+          const match = await this.findBestKeywordMatch(keyword, connection);
+
+          if (!match) {
+            console.log(`⚠️ 일치하는 사전 항목 없음: "${keyword.word}"`);
+            continue;
+          }
+
+          const resolvedImportance = Math.min(
+            Math.max(keyword.importance || 1, match.importance || 1),
+            5
+          );
+
+          const keywordConfidence = this.calculateKeywordConfidence({
+            similarity: match.similarity,
+            importance: resolvedImportance,
+            occurrences: keyword.occurrences || 1
+          });
+
           analyzedKeywords.push({
-            keyword: keyword,
-            importance: keywordInfo.importance || 1,
-            numbers: keywordInfo.numbers || [],
-            category: keywordInfo.category || '일반',
-            meaning: keywordInfo.meaning || keyword,
-            confidence: 85,
+            keyword: match.keyword,
+            dictionaryKeyword: match.keyword,
+            originalKeyword: keyword.word,
+            normalizedKeyword: match.normalizedKeyword,
+            importance: resolvedImportance,
+            numbers: match.numbers,
+            category: match.category || '일반',
+            meaning: match.meaning || match.keyword,
+            similarity: match.similarity,
+            matchType: match.matchType,
+            matchCandidates: match.candidatesTried,
+            occurrences: keyword.occurrences || 1,
+            variants: keyword.variants || [],
+            confidence: keywordConfidence,
             finalResult: {
-              keyword: keyword,
-              numbers: keywordInfo.numbers || [],
-              stars: '★'.repeat(keywordInfo.importance || 1)
+              keyword: match.keyword,
+              originalKeyword: keyword.word,
+              numbers: match.numbers,
+              stars: '★'.repeat(resolvedImportance),
+              similarity: match.similarity,
+              matchType: match.matchType
             }
           });
         }
+
+        return analyzedKeywords;
+      } finally {
+        connection.release();
       }
-      
-      return analyzedKeywords;
     } catch (error) {
       console.error('키워드 분석 오류:', error);
       return [];
     }
   }
-  
-  // 키워드 정보 조회 (데이터베이스 또는 사전에서)
-  static async getKeywordInfo(keyword) {
-    // 실제 구현에서는 데이터베이스 조회
-    // 현재는 간단한 매핑으로 시뮬레이션
-    const keywordDatabase = {
-      '강아지': { importance: 4, numbers: [3, 28], category: '동물', meaning: '애완동물' },
-      '집': { importance: 3, numbers: [4, 17], category: '사물', meaning: '건물' },
-      '뛰어놀고': { importance: 2, numbers: [10, 15], category: '행동', meaning: '활동' },
-      '바다': { importance: 3, numbers: [1, 5], category: '자연', meaning: '물' },
-      '별': { importance: 2, numbers: [5], category: '자연', meaning: '천체' },
-      '고양이': { importance: 4, numbers: [25, 38], category: '동물', meaning: '애완동물' },
-      '나타나서': { importance: 1, numbers: [12], category: '행동', meaning: '출현' },
-      '함께': { importance: 2, numbers: [11, 22], category: '관계', meaning: '동반' },
-      '놀았어요': { importance: 2, numbers: [7, 10], category: '행동', meaning: '활동' }
-    };
-    
-    return keywordDatabase[keyword] || null;
+
+  static calculateKeywordConfidence({ similarity = 0, importance = 1, occurrences = 1 }) {
+    const similarityScore = typeof similarity === 'number' ? similarity : 0;
+    const importanceScore = (importance || 1) * 12;
+    const occurrenceBonus = Math.min(Math.max((occurrences || 1) - 1, 0) * 4, 12);
+    const baseScore = Math.round(similarityScore * 0.45 + importanceScore + occurrenceBonus);
+
+    return Math.min(95, Math.max(40, baseScore));
   }
-  
+
+  static async findBestKeywordMatch(keywordInfo, existingConnection = null) {
+    const keywordWord = typeof keywordInfo === 'string' ? keywordInfo : keywordInfo?.word;
+
+    if (!keywordWord || keywordWord.length === 0) {
+      return null;
+    }
+
+    const normalizedInput = normalizeKeyword(keywordWord) || keywordWord;
+    const candidateSet = new Set();
+    candidateSet.add(keywordWord);
+    generateKeywordCandidates(normalizedInput || keywordWord)
+      .map(candidate => normalizeKeyword(candidate) || candidate)
+      .filter(Boolean)
+      .forEach(value => candidateSet.add(value));
+    candidateSet.add(normalizedInput);
+
+    const candidates = Array.from(candidateSet).filter(Boolean);
+
+    const connection = existingConnection || await database.pool.getConnection();
+    const shouldRelease = !existingConnection;
+
+    try {
+      const whereParts = [];
+      const params = [];
+
+      candidates.forEach(candidate => {
+        if (!candidate) return;
+        whereParts.push('k.keyword LIKE ?');
+        params.push(`%${candidate}%`);
+        whereParts.push("? LIKE CONCAT('%', k.keyword, '%')");
+        params.push(candidate);
+      });
+
+      const firstSyllable = normalizedInput?.[0];
+      if (firstSyllable) {
+        whereParts.push('k.keyword LIKE ?');
+        params.push(`${firstSyllable}%`);
+      }
+
+      if (whereParts.length === 0) {
+        whereParts.push('k.keyword = ?');
+        params.push(normalizedInput);
+      }
+
+      const query = `
+        SELECT
+          k.id,
+          k.keyword,
+          k.importance,
+          k.semantic_meaning,
+          c.category_name,
+          GROUP_CONCAT(kn.number ORDER BY kn.number) AS numbers
+        FROM dream_keywords k
+        LEFT JOIN keyword_numbers kn ON k.id = kn.keyword_id
+        LEFT JOIN keyword_categories c ON k.category_id = c.id
+        WHERE ${whereParts.join(' OR ')}
+        GROUP BY k.id, k.keyword, k.importance, k.semantic_meaning, c.category_name
+        ORDER BY k.importance DESC, k.keyword
+        LIMIT 100
+      `;
+
+      const [rows] = await connection.execute(query, params);
+
+      if (!rows || rows.length === 0) {
+        return null;
+      }
+
+      const scored = rows.map(row => {
+        const dbKeyword = row.keyword;
+        const strippedKeyword = dbKeyword
+          ? dbKeyword.replace(/\([^)]*\)/g, ' ').replace(/[\[\]]/g, ' ').trim()
+          : '';
+        const normalizedDbKeyword = normalizeKeyword(strippedKeyword) || strippedKeyword || dbKeyword;
+
+        const similarityToOriginal = calculateSimilarity(keywordWord, dbKeyword || '');
+        const similarityToNormalized = calculateSimilarity(normalizedInput, normalizedDbKeyword || '');
+        const similarity = Math.max(similarityToOriginal, similarityToNormalized);
+
+        const numbers = row.numbers
+          ? Array.from(new Set(
+              row.numbers
+                .split(',')
+                .map(num => parseInt(num, 10))
+                .filter(num => !Number.isNaN(num))
+            ))
+          : [];
+
+        return {
+          id: row.id,
+          keyword: dbKeyword,
+          normalizedKeyword: normalizedDbKeyword || dbKeyword,
+          numbers,
+          importance: row.importance || 1,
+          category: row.category_name || null,
+          meaning: row.semantic_meaning || null,
+          similarity,
+          matchType: this.determineMatchType({
+            original: keywordWord,
+            normalizedOriginal: normalizedInput,
+            dbKeyword,
+            normalizedDbKeyword,
+            similarity
+          }),
+          candidatesTried: candidates
+        };
+      });
+
+      const filtered = scored.filter(item => item.similarity >= 55 || item.matchType === 'exact');
+      const rankingPool = filtered.length > 0 ? filtered : scored;
+
+      rankingPool.sort((a, b) => {
+        if (b.similarity !== a.similarity) {
+          return b.similarity - a.similarity;
+        }
+        if ((b.importance || 0) !== (a.importance || 0)) {
+          return (b.importance || 0) - (a.importance || 0);
+        }
+        if (a.numbers.length !== b.numbers.length) {
+          return b.numbers.length - a.numbers.length;
+        }
+        return a.keyword.length - b.keyword.length;
+      });
+
+      return rankingPool[0];
+    } finally {
+      if (shouldRelease) {
+        connection.release();
+      }
+    }
+  }
+
+  static determineMatchType({ original, normalizedOriginal, dbKeyword, normalizedDbKeyword, similarity }) {
+    const normalizedDb = normalizeKeyword(dbKeyword || '') || normalizedDbKeyword || dbKeyword;
+    const normalizedOriginalWord = normalizeKeyword(original || '') || normalizedOriginal || original;
+
+    if (normalizedDb && normalizedOriginalWord && normalizedDb === normalizedOriginalWord) {
+      return 'exact';
+    }
+
+    if (dbKeyword && original && (dbKeyword.includes(original) || original.includes(dbKeyword))) {
+      return 'partial';
+    }
+
+    if (
+      normalizedDb &&
+      normalizedOriginalWord &&
+      (normalizedDb.includes(normalizedOriginalWord) || normalizedOriginalWord.includes(normalizedDb))
+    ) {
+      return 'partial';
+    }
+
+    if (typeof similarity === 'number' && similarity >= 80) {
+      return 'fuzzy-high';
+    }
+
+    if (typeof similarity === 'number' && similarity >= 60) {
+      return 'fuzzy';
+    }
+
+    return 'broad';
+  }
+
   // 번호 추천 알고리즘
   static async generateRecommendation(keywords) {
     try {
@@ -189,6 +379,18 @@ class DreamAnalysisEngine {
         const keywordScore = (keyword.importance || 1) * 10;
         totalScore += keywordScore;
         maxScore += 40; // 최대 중요도 4 * 10
+
+        if (typeof keyword.similarity === 'number') {
+          const similarityBonus = Math.min(Math.max(keyword.similarity, 0), 100) * 0.2;
+          totalScore += similarityBonus;
+          maxScore += 20;
+        }
+
+        if (typeof keyword.confidence === 'number') {
+          const normalizedConfidence = Math.min(Math.max(keyword.confidence, 0), 100);
+          totalScore += normalizedConfidence * 0.1;
+          maxScore += 10;
+        }
       }
       
       // 동음이의어 해결 기반 신뢰도
